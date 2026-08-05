@@ -99,14 +99,27 @@ if not SKIP_CUDA_BUILD:
             if not it:
                 continue
             it = it.lower().replace("sm_", "").replace("compute_", "")
-            it = it.replace("a", "")
-            if it.endswith("+ptx"):
+
+            has_ptx = it.endswith("+ptx")
+            if has_ptx:
                 it = it[:-4]
-                compute_capabilities.add(f"{it}+PTX")
-            else:
-                if len(it) == 2 and it.isdigit():
+
+            # Accept both "8.9"/"12.0" and the commonly used
+            # "89"/"120" spellings.
+            it = it.replace("a", "")
+            if it.isdigit():
+                if len(it) == 2:
                     it = f"{it[0]}.{it[1]}"
-                compute_capabilities.add(it)
+                elif len(it) == 3:
+                    it = f"{it[:-1]}.{it[-1]}"
+
+            if it not in SUPPORTED_ARCHS:
+                raise RuntimeError(
+                    f"Unsupported CUDA architecture '{it}'. "
+                    f"Supported architectures: {sorted(SUPPORTED_ARCHS)}"
+                )
+
+            compute_capabilities.add(f"{it}+PTX" if has_ptx else it)
 
     # If not provided, try to detect from local GPUs
     if not compute_capabilities:
@@ -139,34 +152,72 @@ if not SKIP_CUDA_BUILD:
         raise RuntimeError(
             "CUDA 12.8 or higher is required for compute capability 12.0.")
 
-    # Add target compute capabilities to NVCC flags.
-    for capability in compute_capabilities:
-        if capability.startswith("8.0"):
+    # Build architecture flags per extension.
+    #
+    # The sm90 source uses Hopper-only instructions (WGMMA, TMA,
+    # mbarrier, cp.async.bulk.tensor, ...).  It must not be compiled
+    # with -gencode targets such as sm89, otherwise ptxas tries to
+    # assemble Hopper instructions for Ada and fails.
+    #
+    # Keep the common compiler flags in NVCC_FLAGS and attach only the
+    # appropriate architecture flags to each CUDAExtension below.
+    ARCH_FLAGS_ALL = []
+    ARCH_FLAGS_SM89 = []
+    ARCH_FLAGS_SM90 = []
+
+    ARCH_NUMBERS = {
+        "8.0": "80",
+        "8.6": "86",
+        "8.9": "89",
+        "9.0": "90a",
+        "10.0": "100a",
+        "12.0": "120a",
+        "12.1": "121a",
+    }
+
+    for capability in sorted(compute_capabilities):
+        base_capability = capability[:-4] if capability.endswith("+PTX") else capability
+        num = ARCH_NUMBERS[base_capability]
+
+        if base_capability == "8.0":
             HAS_SM80 = True
-            num = "80"
-        elif capability.startswith("8.6"):
+        elif base_capability == "8.6":
             HAS_SM86 = True
-            num = "86"
-        elif capability.startswith("8.9"):
+        elif base_capability == "8.9":
             HAS_SM89 = True
-            num = "89"
-        elif capability.startswith("9.0"):
+        elif base_capability == "9.0":
             HAS_SM90 = True
-            num = "90a"
-        elif capability.startswith("10.0"):
+        elif base_capability == "10.0":
             HAS_SM100 = True
-            num = "100a"
-        elif capability.startswith("12.0"):
+        elif base_capability == "12.0":
             HAS_SM120 = True
-            num = "120a"
-        elif capability.startswith("12.1"):
+        elif base_capability == "12.1":
             HAS_SM121 = True
-            num = "121a"
-        else:
-            continue
-        NVCC_FLAGS += ["-gencode", f"arch=compute_{num},code=sm_{num}"]
+
+        arch_flags = [
+            "-gencode",
+            f"arch=compute_{num},code=sm_{num}",
+        ]
         if capability.endswith("+PTX"):
-            NVCC_FLAGS += ["-gencode", f"arch=compute_{num},code=compute_{num}"]
+            arch_flags += [
+                "-gencode",
+                f"arch=compute_{num},code=compute_{num}",
+            ]
+
+        # _qattn_sm80 and _fused are compiled for every requested
+        # architecture supported by this setup.py.
+        ARCH_FLAGS_ALL += arch_flags
+
+        # _qattn_sm89 contains the Ada/Hopper/Blackwell FP8 MMA path.
+        # It is not needed for sm80/sm86 and is only compiled for
+        # architectures >= 8.9.
+        if base_capability in {"8.9", "9.0", "10.0", "12.0", "12.1"}:
+            ARCH_FLAGS_SM89 += arch_flags
+
+        # _qattn_sm90 contains Hopper-only WGMMA/TMA code.  Compile it
+        # only for sm90; never pass sm89/sm120/etc. to this extension.
+        if base_capability == "9.0":
+            ARCH_FLAGS_SM90 += arch_flags
 
     # Fused kernels and QAttn variants
     from torch.utils.cpp_extension import CUDAExtension
@@ -179,7 +230,10 @@ if not SKIP_CUDA_BUILD:
                     "csrc/qattn/pybind_sm80.cpp",
                     "csrc/qattn/qk_int_sv_f16_cuda_sm80.cu",
                 ],
-                extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS + ARCH_FLAGS_ALL,
+                },
             )
         )
 
@@ -197,7 +251,10 @@ if not SKIP_CUDA_BUILD:
                     "csrc/qattn/sm89_qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf.cu",
                     "csrc/qattn/sm89_qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf.cu",
                 ],
-                extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS + ARCH_FLAGS_SM89,
+                },
             )
         )
 
@@ -209,7 +266,10 @@ if not SKIP_CUDA_BUILD:
                     "csrc/qattn/pybind_sm90.cpp",
                     "csrc/qattn/qk_int_sv_f8_cuda_sm90.cu",
                 ],
-                extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS + ARCH_FLAGS_SM90,
+                },
                 extra_link_args=['-lcuda'],
             )
         )
@@ -218,7 +278,10 @@ if not SKIP_CUDA_BUILD:
         CUDAExtension(
             name="sageattention._fused",
             sources=["csrc/fused/pybind.cpp", "csrc/fused/fused.cu"],
-            extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+            extra_compile_args={
+                "cxx": CXX_FLAGS,
+                "nvcc": NVCC_FLAGS + ARCH_FLAGS_ALL,
+            },
         )
     )
 
