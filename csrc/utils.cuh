@@ -15,6 +15,8 @@
  */
 
 #pragma once
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/extension.h>
 
 #define CHECK_CUDA(x) \

@@ -14,6 +14,8 @@ torch::Tensor qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(torch::Tensor q
                     int return_lse)
 {
   CHECK_CUDA(query);
+  const c10::cuda::CUDAGuard device_guard(query.device());
+  const cudaStream_t stream = c10::cuda::getCurrentCUDAStream(query.get_device());
   CHECK_CUDA(key);
   CHECK_CUDA(value);
   CHECK_CUDA(output);
@@ -159,7 +161,7 @@ torch::Tensor qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(torch::Tensor q
             dim3 grid(div_ceil(qo_len, CTA_Q), num_qo_heads, batch_size);
             dim3 block(32, (CTA_Q / WARP_Q) * (CTA_K / WARP_K));
 
-            kernel_func<<<grid, block, smem_max>>>(
+            kernel_func<<<grid, block, smem_max, stream>>>(
               query.data_ptr<int8_t>(), 
               key.data_ptr<int8_t>(),
               reinterpret_cast<int8_t*>(value.data_ptr()),

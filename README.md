@@ -189,6 +189,22 @@ We provide a benchmarking script to compare the speed of different kernels inclu
 ![Local Image](./assets/26.png)
 *Note: SageAttention2++ achieves higher speed.*
 
+## SageAttention2 CUDA Graph validation
+
+SageAttention2 CUDA kernels use the current PyTorch stream on the input device. This stream handling follows [upstream PR #380](https://github.com/thu-ml/SageAttention/pull/380). PyTorch 2.14 requires C++20; for that environment, build and install with:
+
+```bash
+CXX_APPEND_FLAGS=-std=c++20 NVCC_APPEND_FLAGS=-std=c++20 python -m pip install --no-build-isolation .
+```
+
+To test the installed extensions on non-default streams and replay with changing inputs, run from outside the checkout, replacing the path with its actual location:
+
+```bash
+python -m pytest -q /path/to/SageAttention/tests/test_cuda_graph.py
+```
+
+The device-guard test requires two CUDA devices; other cases require one supported CUDA device. Test results apply to the GPU architecture and extension build used for the run.
+
 ## Citation
 **If you use this code or find our work valuable, please cite:**
 ```
