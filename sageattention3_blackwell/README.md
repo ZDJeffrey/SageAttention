@@ -43,6 +43,8 @@ attn_output = sageattn3_blackwell(q, k, v, is_causal=False)
 + `q, k, v` are **FP16/BF16** dtype with the shape `(batch_size, head_num, seq_len, head_dim)` 
 + `is_causal` determines the use of a causal mask.
 
+The implementation preserves the input tensors and launches on the input device's current PyTorch stream. To use CUDA Graphs, warm up the operation first, capture it with fixed shapes and buffers, and update the captured input buffers before replay. The public API uses HND layout and returns the attention output only; it does not expose `return_lse` or a general attention mask.
+
 ## Performance
 ### Speed of Kernels
 ![Speed on RTX5090](../assets/sage3_speed.png)

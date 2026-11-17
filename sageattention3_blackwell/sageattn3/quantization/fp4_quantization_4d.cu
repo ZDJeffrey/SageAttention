@@ -394,6 +394,7 @@ void scaled_fp4_quant(torch::Tensor const& input,
   CHECK_CUDA(input);
   CHECK_CUDA(output);
   CHECK_CUDA(output_sf);
+  c10::cuda::CUDAGuard device_guard{input.device()};
 
   CHECK_LASTDIM_CONTIGUOUS(input);
   CHECK_LASTDIM_CONTIGUOUS(output);
@@ -472,6 +473,7 @@ void scaled_fp4_quant_permute(torch::Tensor const& input,
   CHECK_CUDA(input);
   CHECK_CUDA(output);
   CHECK_CUDA(output_sf);
+  c10::cuda::CUDAGuard device_guard{input.device()};
 
   CHECK_LASTDIM_CONTIGUOUS(input);
   CHECK_LASTDIM_CONTIGUOUS(output);
@@ -551,6 +553,7 @@ void scaled_fp4_quant_trans(torch::Tensor const& input,
   CHECK_CUDA(input);
   CHECK_CUDA(output);
   CHECK_CUDA(output_sf);
+  c10::cuda::CUDAGuard device_guard{input.device()};
 
   CHECK_LASTDIM_CONTIGUOUS(input);
   CHECK_LASTDIM_CONTIGUOUS(output);

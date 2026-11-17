@@ -216,6 +216,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
         bool is_bf16
     ) {
 
+    CHECK_DEVICE(q);
+    c10::cuda::CUDAGuard device_guard{q.device()};
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm120 = dprops->major == 12 && dprops->minor == 0;
     bool is_sm121 = dprops->major == 12 && dprops->minor == 1;
@@ -277,12 +279,6 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
-    // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
-
-    
-
     auto softmax_lse = torch::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
     at::Tensor p;
 
@@ -312,7 +308,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
     params.tile_count_semaphore = tile_count_semaphore.data_ptr<int>();
 
     if (seqlen_k > 0) {
-        auto stream = at::cuda::getCurrentCUDAStream().stream();
+        auto stream = at::cuda::getCurrentCUDAStream(q.get_device()).stream();
         run_mha_fwd(params, stream);
     } else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.

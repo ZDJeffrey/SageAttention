@@ -81,7 +81,7 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
             return x.contiguous()
         return F.pad(x, (0, 0, 0, pad_len), value=0).contiguous()
     
-    k -= k.mean(dim=-2, keepdim=True)  
+    k = k - k.mean(dim=-2, keepdim=True)
     q, k, v = map(lambda x: pad_128(x), [q, k, v])
     if per_block_mean:
         q, qm = triton_group_mean(q)
